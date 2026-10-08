@@ -13,6 +13,7 @@
 #include <bmm_op.hpp>
 #include <tt-metalium/device.hpp>
 #include <fmt/core.h>
+#include <chrono>
 
 using namespace tt::constants;
 using namespace std;
@@ -260,7 +261,15 @@ void matmul_multi_core(
     distributed::EnqueueWriteMeshBuffer(cq, src0_dram_buffer, a, false);
     distributed::EnqueueWriteMeshBuffer(cq, src1_dram_buffer, b, false);
     workload.add_program(device_range, std::move(program));
-    distributed::EnqueueMeshWorkload(cq, workload, false);
+    // First run includes JIT compile and binary upload; the second run measures the matmul itself.
+    for (int run = 0; run < 2; run++) {
+        distributed::Finish(cq);
+        auto t0 = std::chrono::steady_clock::now();
+        distributed::EnqueueMeshWorkload(cq, workload, false);
+        distributed::Finish(cq);
+        auto t1 = std::chrono::steady_clock::now();
+        fmt::print("[multi_core] run {}: {:.3f} ms\n", run, std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
     // Blocking read waits for completion before returning and resizes 'output' as needed
     distributed::EnqueueReadMeshBuffer(cq, output, dst_dram_buffer, true);
 }

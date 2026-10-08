@@ -13,6 +13,7 @@
 #include <bmm_op.hpp>
 #include <fmt/core.h>
 #include <iostream>
+#include <chrono>
 
 using namespace tt::constants;
 using namespace std;
@@ -174,6 +175,7 @@ void matmul_multicore_reuse(
     TT_ASSERT(num_blocks_total <= num_cores_x * num_cores_y);
     CoreRangeSet all_cores(
         tt::tt_metal::num_cores_to_corerangeset(num_blocks_x * num_blocks_y, compute_with_storage_grid_size, true));
+    fmt::print("all_cores: {} (num_cores={})\n", all_cores, all_cores.num_cores());
 
     //////////////////////////////////////////////////
     /*
@@ -335,7 +337,15 @@ void matmul_multicore_reuse(
     distributed::EnqueueWriteMeshBuffer(cq, src0_dram_buffer, a, false);
     distributed::EnqueueWriteMeshBuffer(cq, src1_dram_buffer, b, false);
     workload.add_program(device_range, std::move(program));
-    distributed::EnqueueMeshWorkload(cq, workload, false);
+    // First run includes JIT compile and binary upload; the second run measures the matmul itself.
+    for (int run = 0; run < 2; run++) {
+        distributed::Finish(cq);
+        auto t0 = std::chrono::steady_clock::now();
+        distributed::EnqueueMeshWorkload(cq, workload, false);
+        distributed::Finish(cq);
+        auto t1 = std::chrono::steady_clock::now();
+        fmt::print("[reuse] run {}: {:.3f} ms\n", run, std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
     // Blocking read from shard {0,0} waits for completion and populates 'output'
     distributed::EnqueueReadMeshBuffer(cq, output, dst_dram_buffer, true);
 }
@@ -357,9 +367,9 @@ int main() {
         // NOTE: Maximum number of tiles in output is 120 * 16^2 = 30,720 (eg. [1, 1, 5120, 6144])
 
         /* Create source data */
-        constexpr uint32_t M = 640;  // user-defined
-        constexpr uint32_t N = 640;  // user-defined
-        constexpr uint32_t K = 640;  // user-defined
+        constexpr uint32_t M = 2048;  // user-defined
+        constexpr uint32_t N = 1024;  // user-defined
+        constexpr uint32_t K = 512;   // user-defined
         constexpr uint32_t B = 1;    // user-defined
 
         uint32_t Mt = M / TILE_HEIGHT;
