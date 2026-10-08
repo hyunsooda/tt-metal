@@ -20,8 +20,6 @@ def main():
 
     output = a @ b
 
-    print(output.layout)
-
     output = ttnn.to_layout(output, ttnn.ROW_MAJOR_LAYOUT)
 
     print("Printing ttnn tensor")
